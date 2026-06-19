@@ -1,9 +1,27 @@
 {
   "name": "amiriel",
-  "version": "0.0.1-beta.0",
+  "version": "0.0.1-beta.1",
   "description": "Portable Vue 3 body editor and renderer for Amiriel letters.",
   "type": "module",
   "license": "MIT",
+  "homepage": "https://amiriel.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dingdangdog/Amiriel.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dingdangdog/Amiriel/issues"
+  },
+  "keywords": [
+    "vue",
+    "vue3",
+    "vue-component",
+    "editor",
+    "letter-editor",
+    "rich-text",
+    "typescript",
+    "vite"
+  ],
   "main": "./dist/amiriel.umd.cjs",
   "module": "./dist/amiriel.js",
   "types": "./dist/index.d.ts",
