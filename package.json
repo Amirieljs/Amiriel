@@ -1,6 +1,6 @@
 {
   "name": "amiriel",
-  "version": "0.0.1-beta.1",
+  "version": "0.0.1-beta.2",
   "description": "Portable Vue 3 body editor and renderer for Amiriel letters.",
   "type": "module",
   "license": "MIT",
@@ -36,7 +36,8 @@
   "files": [
     "dist",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "vite build && vue-tsc -p tsconfig.json --declaration --emitDeclarationOnly",
