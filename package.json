@@ -1,0 +1,40 @@
+{
+  "name": "amiriel",
+  "version": "0.0.1",
+  "description": "Portable Vue 3 body editor and renderer for Amiriel letters.",
+  "type": "module",
+  "license": "MIT",
+  "main": "./dist/amiriel.umd.cjs",
+  "module": "./dist/amiriel.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/amiriel.js",
+      "require": "./dist/amiriel.umd.cjs"
+    },
+    "./style.css": "./dist/style.css"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "vue-tsc -p tsconfig.json --declaration --emitDeclarationOnly && vite build",
+    "typecheck": "vue-tsc -p tsconfig.json --noEmit"
+  },
+  "peerDependencies": {
+    "vue": ">=3.5.0"
+  },
+  "dependencies": {
+    "@heroicons/vue": "2.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.3",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.7",
+    "vue": "^3.5.34",
+    "vue-tsc": "^3.1.8"
+  }
+}
