@@ -9,6 +9,7 @@ export default defineConfig({
       entry: resolve(__dirname, "src/index.ts"),
       name: "Amiriel",
       fileName: "amiriel",
+      cssFileName: "style",
     },
     rollupOptions: {
       external: ["vue"],
