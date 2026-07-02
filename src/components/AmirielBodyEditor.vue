@@ -19,6 +19,8 @@ import type {
   AmirielMediaPlacement,
   AmirielMediaRequest,
   AmirielPage,
+  AmirielPaperSize,
+  AmirielPaperSizeLimits,
   AmirielTextBlock,
   AmirielTextColor,
   AmirielTheme,
@@ -36,6 +38,8 @@ import {
   mediaAspectRatio,
   mediaSizeWithinPaper,
   normalizeDocument,
+  normalizePaperSize,
+  normalizePaperSizeLimits,
   safeAspectRatio,
   syncPageText,
   themeDefaultTextBlockColor,
@@ -65,12 +69,19 @@ const props = withDefaults(defineProps<{
   accept?: string;
   showGithubLink?: boolean;
   githubUrl?: string;
+  /** Initial paper size for legacy documents and fixed-size editors. */
+  defaultPaperSize?: AmirielPaperSize;
+  /** Min/max bounds used when paper resizing is enabled. */
+  paperSizeLimits?: AmirielPaperSizeLimits;
+  /** When false, the editor always uses defaultPaperSize and hides paper size controls. */
+  paperResizable?: boolean;
 }>(), {
   readonly: false,
   locale: "en",
   accept: "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime",
   showGithubLink: true,
   githubUrl: DEFAULT_GITHUB_URL,
+  paperResizable: true,
 });
 
 const emit = defineEmits<{
@@ -81,6 +92,7 @@ const emit = defineEmits<{
 
 type DragKind = "placement" | "text";
 type DragMode = "move" | "resize" | "resize-nw";
+type PaperDimension = "width" | "height";
 
 interface DragState {
   kind: DragKind;
@@ -98,14 +110,24 @@ interface DragState {
   paperHeight: number;
 }
 
-const draft = ref<AmirielDocument>(normalizeDocument(props.modelValue));
+function paperNormalizeOptions() {
+  return {
+    defaultPaperSize: props.defaultPaperSize,
+    paperSizeLimits: props.paperSizeLimits,
+    paperResizable: props.paperResizable,
+  };
+}
+
+const draft = ref<AmirielDocument>(normalizeDocument(props.modelValue, paperNormalizeOptions()));
 const selectedPageId = ref(draft.value.pages[0]?.id ?? "");
 const activePlacementId = ref("");
 const activeTextBlockId = ref("");
 const fontMenuId = ref("");
 const sizeMenuId = ref("");
 const colorMenuId = ref("");
+const paperFrameRef = ref<HTMLElement | null>(null);
 const previewPaperRef = ref<HTMLElement | null>(null);
+const paperScale = ref(1);
 const uploadBusy = ref(false);
 const pendingUpload = ref<{
   file: File;
@@ -123,10 +145,21 @@ const overflowingTextBlockIds = ref(new Set<string>());
 const textareaRefs = new Map<string, HTMLTextAreaElement>();
 let dragState: DragState | null = null;
 let overflowObserver: ResizeObserver | null = null;
+let paperScaleObserver: ResizeObserver | null = null;
 let syncingFromParent = false;
 
 const textBlockFontSizes = [12, 14, 16, 18, 20, 24] as const;
 const resolvedLabels = computed(() => resolveAmirielLabels(props.locale, props.labels));
+const activePaperSize = computed(() => normalizePaperSize(draft.value.paper, paperNormalizeOptions()));
+const activePaperSizeLimits = computed(() => normalizePaperSizeLimits(props.paperSizeLimits));
+const paperFrameStyle = computed(() => ({
+  height: `${activePaperSize.value.height * paperScale.value}px`,
+}));
+const paperSurfaceStyle = computed(() => ({
+  width: `${activePaperSize.value.width}px`,
+  height: `${activePaperSize.value.height}px`,
+  transform: `scale(${paperScale.value})`,
+}));
 const resolvedThemes = computed(() => mergeAmirielThemeDefinitions(props.themes));
 const activeThemeDefinition = computed(() =>
   findAmirielThemeDefinition(draft.value.theme, props.themes),
@@ -150,15 +183,27 @@ const uploadLimitReached = computed(() =>
 );
 
 watch(
-  () => props.modelValue,
-  (value) => {
+  () => [props.modelValue, props.defaultPaperSize, props.paperSizeLimits, props.paperResizable] as const,
+  ([value]) => {
     syncingFromParent = true;
-    draft.value = normalizeDocument(value);
+    draft.value = normalizeDocument(value, paperNormalizeOptions());
     if (!draft.value.pages.some((page) => page.id === selectedPageId.value)) {
       selectedPageId.value = draft.value.pages[0]?.id ?? "";
     }
     nextTick(() => {
       syncingFromParent = false;
+      refreshPaperScale();
+      refreshOverflowStates();
+    });
+  },
+  { deep: true },
+);
+
+watch(
+  activePaperSize,
+  () => {
+    nextTick(() => {
+      refreshPaperScale();
       refreshOverflowStates();
     });
   },
@@ -178,10 +223,13 @@ function label(template: string, values: Record<string, string | number>) {
 
 function commit() {
   if (syncingFromParent) return;
-  const value = normalizeDocument(draft.value);
+  const value = normalizeDocument(draft.value, paperNormalizeOptions());
   draft.value = value;
   emit("update:modelValue", value);
-  nextTick(refreshOverflowStates);
+  nextTick(() => {
+    refreshPaperScale();
+    refreshOverflowStates();
+  });
 }
 
 function fontStyle(font?: AmirielFont) {
@@ -221,6 +269,17 @@ function textBlockStyle(block: AmirielTextBlock) {
   };
 }
 
+function updatePaperDimension(dimension: PaperDimension, event: Event) {
+  if (props.readonly || !props.paperResizable) return;
+  const target = event.currentTarget as HTMLInputElement;
+  draft.value.paper = normalizePaperSize({
+    ...activePaperSize.value,
+    [dimension]: Number(target.value),
+  }, paperNormalizeOptions());
+  commit();
+  nextTick(refreshPaperScale);
+}
+
 function mediaById(id: string) {
   return draft.value.media.find((item) => item.id === id);
 }
@@ -245,12 +304,24 @@ function currentPaperRect() {
   return previewPaperRef.value?.getBoundingClientRect();
 }
 
+function placementHeightPercent(placement: AmirielMediaPlacement, paperWidth?: number, paperHeight?: number) {
+  const media = mediaById(placement.mediaId);
+  const paper = activePaperSize.value;
+  return clamp(heightPercentForWidth(
+    placement.width,
+    placement.aspectRatio || mediaAspectRatio(media),
+    paperWidth || paper.width,
+    paperHeight || paper.height,
+  ), 8, 100 - placement.y);
+}
+
 function placementStyle(placement: AmirielMediaPlacement) {
   const media = mediaById(placement.mediaId);
   return {
     left: `${placement.x}%`,
     top: `${placement.y}%`,
     width: `${placement.width}%`,
+    height: `${placementHeightPercent(placement)}%`,
     aspectRatio: String(placement.aspectRatio || safeAspectRatio(media?.width, media?.height) || safeAspectRatio(placement.width, placement.height)),
     zIndex: placement.z,
   };
@@ -634,7 +705,9 @@ function beginDrag(event: PointerEvent, kind: DragKind, item: AmirielMediaPlacem
     startX: item.x,
     startY: item.y,
     startWidth: item.width,
-    startHeight: item.height || 22,
+    startHeight: kind === "placement"
+      ? placementHeightPercent(item as AmirielMediaPlacement, rect.width, rect.height)
+      : item.height || 22,
     paperWidth: rect.width,
     paperHeight: rect.height,
   };
@@ -653,8 +726,11 @@ function onDragMove(event: PointerEvent) {
   if (!item) return;
 
   if (dragState.mode === "move") {
+    const itemHeight = dragState.kind === "placement"
+      ? placementHeightPercent(item as AmirielMediaPlacement, dragState.paperWidth, dragState.paperHeight)
+      : item.height || dragState.startHeight;
     item.x = clamp(dragState.startX + dx, 0, 100 - item.width);
-    item.y = clamp(dragState.startY + dy, 0, 100 - (item.height || dragState.startHeight));
+    item.y = clamp(dragState.startY + dy, 0, 100 - itemHeight);
   } else if (dragState.kind === "placement") {
     const placement = item as AmirielMediaPlacement;
     const aspectRatio = placement.aspectRatio || mediaAspectRatio(mediaById(placement.mediaId));
@@ -715,6 +791,26 @@ function isTextBlockOverflowing(blockId: string) {
   return overflowingTextBlockIds.value.has(blockId);
 }
 
+function refreshPaperScale() {
+  const frame = paperFrameRef.value;
+  const width = activePaperSize.value.width;
+  if (!frame || width <= 0) {
+    paperScale.value = 1;
+    return;
+  }
+  const availableWidth = frame.clientWidth;
+  paperScale.value = availableWidth > 0 ? availableWidth / width : 1;
+}
+
+function setupPaperScaleObserver() {
+  paperScaleObserver?.disconnect();
+  paperScaleObserver = null;
+  refreshPaperScale();
+  if (!paperFrameRef.value || typeof ResizeObserver === "undefined") return;
+  paperScaleObserver = new ResizeObserver(refreshPaperScale);
+  paperScaleObserver.observe(paperFrameRef.value);
+}
+
 function setupOverflowObserver() {
   overflowObserver?.disconnect();
   overflowObserver = null;
@@ -737,8 +833,12 @@ function onLayoutClick(event: MouseEvent) {
   }
 }
 
-onMounted(refreshOverflowStates);
+onMounted(() => {
+  setupPaperScaleObserver();
+  refreshOverflowStates();
+});
 onUnmounted(() => {
+  paperScaleObserver?.disconnect();
   overflowObserver?.disconnect();
   endDrag();
   clearPendingUpload();
@@ -770,7 +870,8 @@ onUnmounted(() => {
 
     <div class="amiriel-body-editor__layout" @click="onLayoutClick">
       <div class="amiriel-body-editor__workspace">
-        <article ref="previewPaperRef" class="amiriel-body-editor__paper" @pointerdown.self="addTextBlockAt($event)">
+        <div ref="paperFrameRef" class="amiriel-body-editor__paper-frame" :style="paperFrameStyle">
+        <article ref="previewPaperRef" class="amiriel-body-editor__paper" :style="paperSurfaceStyle" @pointerdown.self="addTextBlockAt($event)">
           <button v-if="!readonly && selectedPage" type="button" class="amiriel-body-editor__delete-page"
             :disabled="draft.pages.length <= 1" :aria-label="resolvedLabels.removePage"
             :title="resolvedLabels.removePage" @click.stop="removePage(selectedPage.id)">
@@ -917,6 +1018,7 @@ onUnmounted(() => {
             {{ resolvedLabels.pageMediaHint }}
           </div>
         </article>
+        </div>
       </div>
 
       <aside class="amiriel-body-editor__side">
@@ -935,6 +1037,32 @@ onUnmounted(() => {
                 resolvedLimits.maxTextBlocksPerPage
             }) }}</span>
             <span>{{ label(resolvedLabels.charCount, { count: combinedPageText(selectedPage).trim().length }) }}</span>
+          </div>
+        </section>
+
+        <section v-if="paperResizable && !readonly" class="amiriel-body-editor__panel">
+          <div class="amiriel-body-editor__panel-head">
+            <h3>{{ resolvedLabels.paperSizeTitle }}</h3>
+          </div>
+          <div class="amiriel-body-editor__paper-size-fields">
+            <label class="amiriel-body-editor__paper-size-field">
+              <span>{{ resolvedLabels.paperWidth }}</span>
+              <span class="amiriel-body-editor__paper-size-input">
+                <input type="number" inputmode="numeric" :min="activePaperSizeLimits.minWidth"
+                  :max="activePaperSizeLimits.maxWidth" :value="activePaperSize.width"
+                  @change="updatePaperDimension('width', $event)" />
+                <span>{{ resolvedLabels.paperSizeUnit }}</span>
+              </span>
+            </label>
+            <label class="amiriel-body-editor__paper-size-field">
+              <span>{{ resolvedLabels.paperHeight }}</span>
+              <span class="amiriel-body-editor__paper-size-input">
+                <input type="number" inputmode="numeric" :min="activePaperSizeLimits.minHeight"
+                  :max="activePaperSizeLimits.maxHeight" :value="activePaperSize.height"
+                  @change="updatePaperDimension('height', $event)" />
+                <span>{{ resolvedLabels.paperSizeUnit }}</span>
+              </span>
+            </label>
           </div>
         </section>
 
@@ -1150,15 +1278,25 @@ onUnmounted(() => {
   padding: 1.25rem;
 }
 
-.amiriel-body-editor__paper {
+.amiriel-body-editor__paper-frame {
   position: relative;
-  min-height: 520px;
+  width: 100%;
+  overflow: visible;
+}
+
+.amiriel-body-editor__paper {
+  position: absolute;
+  top: 0;
+  left: 0;
+  min-height: 0;
   overflow: hidden;
   border: 1px solid var(--amiriel-paper-border);
   border-radius: 0.6rem;
   background: var(--amiriel-paper-bg);
   color: var(--amiriel-paper-text);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 30px 90px rgba(0, 0, 0, 0.45);
+  transform-origin: top left;
+  will-change: transform;
 }
 
 .amiriel-body-editor__paper-head {
@@ -1509,6 +1647,58 @@ onUnmounted(() => {
   font-size: 0.75rem;
 }
 
+.amiriel-body-editor__paper-size-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.amiriel-body-editor__paper-size-field {
+  display: grid;
+  min-width: 0;
+  gap: 0.35rem;
+  color: var(--amiriel-editor-muted);
+  font-size: 0.75rem;
+}
+
+.amiriel-body-editor__paper-size-input {
+  display: flex;
+  min-width: 0;
+  height: 2.25rem;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--amiriel-editor-border);
+  border-radius: 0.5rem;
+  background: rgba(0, 0, 0, 0.2);
+  color: #fff;
+}
+
+.amiriel-body-editor__paper-size-input:focus-within {
+  border-color: rgba(214, 170, 103, 0.65);
+  box-shadow: 0 0 0 2px rgba(214, 170, 103, 0.14);
+}
+
+.amiriel-body-editor__paper-size-input input {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.875rem;
+  outline: none;
+  padding: 0 0.55rem;
+}
+
+.amiriel-body-editor__paper-size-input span {
+  flex: 0 0 auto;
+  padding-right: 0.55rem;
+  color: var(--amiriel-editor-faint);
+  font-size: 0.75rem;
+}
+
 .amiriel-body-editor__icon-button.is-label {
   position: relative;
   cursor: pointer;
@@ -1768,8 +1958,5 @@ onUnmounted(() => {
     display: none;
   }
 
-  .amiriel-body-editor__paper {
-    min-height: 460px;
-  }
 }
 </style>

@@ -16,6 +16,24 @@ export type AmirielTextColor =
   | "black"
   | "white";
 
+export interface AmirielPaperSize {
+  width: number;
+  height: number;
+}
+
+export interface AmirielPaperSizeLimits {
+  minWidth?: number;
+  maxWidth?: number;
+  minHeight?: number;
+  maxHeight?: number;
+}
+
+export interface AmirielNormalizeOptions {
+  defaultPaperSize?: AmirielPaperSize;
+  paperSizeLimits?: AmirielPaperSizeLimits;
+  paperResizable?: boolean;
+}
+
 export interface AmirielMediaPlacement {
   id: string;
   mediaId: string;
@@ -71,6 +89,7 @@ export interface AmirielDocument {
   theme: AmirielTheme;
   pages: AmirielPage[];
   media: AmirielMedia[];
+  paper?: AmirielPaperSize;
 }
 
 export interface AmirielEditorLimits {
@@ -85,6 +104,10 @@ export interface AmirielLabels {
   themes: Partial<Record<AmirielBuiltinTheme, string>> & Record<string, string>;
   fonts: Record<AmirielFont, string>;
   pagesCount: string;
+  paperSizeTitle: string;
+  paperWidth: string;
+  paperHeight: string;
+  paperSizeUnit: string;
   addPage: string;
   removePage: string;
   pagePlaceholder: string;

@@ -15,7 +15,10 @@ export type {
   AmirielMediaPlacement,
   AmirielMediaRequest,
   AmirielMediaUploadProgress,
+  AmirielNormalizeOptions,
   AmirielPage,
+  AmirielPaperSize,
+  AmirielPaperSizeLimits,
   AmirielTextBlock,
   AmirielTextColor,
   AmirielTheme,
@@ -40,6 +43,8 @@ export {
 } from "./themes";
 
 export {
+  AMIRIEL_DEFAULT_PAPER_SIZE,
+  AMIRIEL_DEFAULT_PAPER_SIZE_LIMITS,
   AMIRIEL_FONT_OPTIONS,
   AMIRIEL_FONT_STACKS,
   AMIRIEL_TEXT_COLORS,
@@ -49,5 +54,7 @@ export {
   combinedPageText,
   formatVideoDuration,
   normalizeDocument,
+  normalizePaperSize,
+  normalizePaperSizeLimits,
   themeDefaultTextBlockColor,
 } from "./utils";

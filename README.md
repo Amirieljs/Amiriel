@@ -128,8 +128,13 @@ The package does not include storage, authentication, database code, or applicat
 | `themes` | — | Override built-in themes and/or register custom paper themes (see [Themes](#themes)) |
 | `showGithubLink` | `true` | Show GitHub link on the text-block toolbar |
 | `githubUrl` | `https://github.com/dingdangdog/Amiriel` | Target URL for the GitHub button |
+| `defaultPaperSize` | `{ width: 720, height: 520 }` | Fallback paper size for legacy documents and fixed-size editors |
+| `paperSizeLimits` | `{ minWidth: 320, maxWidth: 1600, minHeight: 240, maxHeight: 2200 }` | Bounds applied when paper resizing is enabled |
+| `paperResizable` | `true` | Allow users to edit paper width/height; when `false`, `defaultPaperSize` is always used and limits are ignored |
 
 Set `:show-github-link="false"` in production apps that should not display the open-source attribution.
+
+`AmirielBodyRenderer` accepts the same `defaultPaperSize`, `paperSizeLimits`, and `paperResizable` props so read-only rendering can match the editor and legacy documents can use the same fallback size.
 
 ### Labels
 

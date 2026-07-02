@@ -3,7 +3,10 @@ import type {
   AmirielFont,
   AmirielMedia,
   AmirielMediaPlacement,
+  AmirielNormalizeOptions,
   AmirielPage,
+  AmirielPaperSize,
+  AmirielPaperSizeLimits,
   AmirielTextBlock,
   AmirielTextColor,
   AmirielTheme,
@@ -28,6 +31,13 @@ export const AMIRIEL_TEXT_COLORS: Record<AmirielTextColor, string> = {
 export const AMIRIEL_TEXT_COLOR_OPTIONS = Object.keys(AMIRIEL_TEXT_COLORS) as AmirielTextColor[];
 export const AMIRIEL_FONT_OPTIONS: AmirielFont[] = ["system", "serif", "handwritten"];
 export const AMIRIEL_THEME_OPTIONS = AMIRIEL_BUILTIN_THEME_IDS;
+export const AMIRIEL_DEFAULT_PAPER_SIZE: AmirielPaperSize = { width: 720, height: 520 };
+export const AMIRIEL_DEFAULT_PAPER_SIZE_LIMITS: Required<AmirielPaperSizeLimits> = {
+  minWidth: 320,
+  maxWidth: 1600,
+  minHeight: 240,
+  maxHeight: 2200,
+};
 
 export const AMIRIEL_THEME_DEFAULT_TEXT_COLOR = {
   midnight: "white",
@@ -47,6 +57,42 @@ export function themeDefaultTextBlockColor(theme?: AmirielTheme): AmirielTextCol
 
 export function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function positiveInteger(value: unknown, fallback: number) {
+  const next = Number(value);
+  if (!Number.isFinite(next) || next <= 0) return fallback;
+  return Math.round(next);
+}
+
+function normalizeRawPaperSize(value: Partial<AmirielPaperSize> | undefined, fallback: AmirielPaperSize): AmirielPaperSize {
+  return {
+    width: positiveInteger(value?.width, fallback.width),
+    height: positiveInteger(value?.height, fallback.height),
+  };
+}
+
+export function normalizePaperSizeLimits(limits?: AmirielPaperSizeLimits): Required<AmirielPaperSizeLimits> {
+  const minWidth = positiveInteger(limits?.minWidth, AMIRIEL_DEFAULT_PAPER_SIZE_LIMITS.minWidth);
+  const minHeight = positiveInteger(limits?.minHeight, AMIRIEL_DEFAULT_PAPER_SIZE_LIMITS.minHeight);
+  const maxWidth = Math.max(minWidth, positiveInteger(limits?.maxWidth, AMIRIEL_DEFAULT_PAPER_SIZE_LIMITS.maxWidth));
+  const maxHeight = Math.max(minHeight, positiveInteger(limits?.maxHeight, AMIRIEL_DEFAULT_PAPER_SIZE_LIMITS.maxHeight));
+  return { minWidth, maxWidth, minHeight, maxHeight };
+}
+
+export function normalizePaperSize(
+  value?: Partial<AmirielPaperSize>,
+  options: AmirielNormalizeOptions = {},
+): AmirielPaperSize {
+  const fallback = normalizeRawPaperSize(options.defaultPaperSize, AMIRIEL_DEFAULT_PAPER_SIZE);
+  if (options.paperResizable === false) return fallback;
+
+  const limits = normalizePaperSizeLimits(options.paperSizeLimits);
+  const paper = normalizeRawPaperSize(value, fallback);
+  return {
+    width: clamp(paper.width, limits.minWidth, limits.maxWidth),
+    height: clamp(paper.height, limits.minHeight, limits.maxHeight),
+  };
 }
 
 export function safeAspectRatio(width?: number, height?: number) {
@@ -123,12 +169,16 @@ export function normalizeTextBlocks(page: AmirielPage): AmirielTextBlock[] {
   }];
 }
 
-export function normalizePlacement(placement: AmirielMediaPlacement, media?: AmirielMedia): AmirielMediaPlacement {
+export function normalizePlacement(
+  placement: AmirielMediaPlacement,
+  media?: AmirielMedia,
+  paperSize: AmirielPaperSize = AMIRIEL_DEFAULT_PAPER_SIZE,
+): AmirielMediaPlacement {
   const aspectRatio = placement.aspectRatio || mediaAspectRatio(media) || safeAspectRatio(placement.width, placement.height);
   const x = clamp(placement.x, 0, 92);
   const y = clamp(placement.y, 0, 92);
   const width = clamp(placement.width, 8, 100 - x);
-  const height = clamp(placement.height || fallbackHeightPercent(width, aspectRatio), 8, 100 - y);
+  const height = clamp(heightPercentForWidth(width, aspectRatio, paperSize.width, paperSize.height), 8, 100 - y);
   return {
     id: placement.id,
     mediaId: placement.mediaId,
@@ -141,10 +191,14 @@ export function normalizePlacement(placement: AmirielMediaPlacement, media?: Ami
   };
 }
 
-export function normalizeMediaPlacements(page: AmirielPage, mediaList: AmirielMedia[]): AmirielMediaPlacement[] {
+export function normalizeMediaPlacements(
+  page: AmirielPage,
+  mediaList: AmirielMedia[],
+  paperSize: AmirielPaperSize = AMIRIEL_DEFAULT_PAPER_SIZE,
+): AmirielMediaPlacement[] {
   const existing = (page.mediaPlacements ?? []).filter((placement) => Boolean(placement.id && placement.mediaId));
   if (existing.length) {
-    return existing.map((placement) => normalizePlacement(placement, mediaList.find((item) => item.id === placement.mediaId)));
+    return existing.map((placement) => normalizePlacement(placement, mediaList.find((item) => item.id === placement.mediaId), paperSize));
   }
 
   return (page.mediaIds ?? []).map((mediaId, index) => {
@@ -157,10 +211,10 @@ export function normalizeMediaPlacements(page: AmirielPage, mediaList: AmirielMe
       x: 10 + (index % 2) * 42,
       y: 28 + Math.floor(index / 2) * 28,
       width,
-      height: fallbackHeightPercent(width, aspectRatio),
+      height: heightPercentForWidth(width, aspectRatio, paperSize.width, paperSize.height),
       aspectRatio,
       z: index + 1,
-    }, media);
+    }, media, paperSize);
   });
 }
 
@@ -183,10 +237,11 @@ function clonePlainDeep<T>(value: T): T {
   ) as T;
 }
 
-export function normalizeDocument(value: AmirielDocument): AmirielDocument {
+export function normalizeDocument(value: AmirielDocument, options: AmirielNormalizeOptions = {}): AmirielDocument {
   const clone = clonePlainDeep(value);
   clone.theme ||= "midnight";
   clone.media ||= [];
+  clone.paper = normalizePaperSize(clone.paper, options);
   const fallbackPages: AmirielPage[] = [{
     id: crypto.randomUUID(),
     order: 0,
@@ -201,7 +256,7 @@ export function normalizeDocument(value: AmirielDocument): AmirielDocument {
     order: index,
     font: page.font || "handwritten",
     mediaIds: page.mediaIds || [],
-    mediaPlacements: normalizeMediaPlacements(page, clone.media),
+    mediaPlacements: normalizeMediaPlacements(page, clone.media, clone.paper),
     textBlocks: normalizeTextBlocks(page),
   }));
   for (const page of clone.pages) syncPageText(page);

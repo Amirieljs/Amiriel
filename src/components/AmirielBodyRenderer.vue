@@ -1,9 +1,28 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { FilmIcon } from "@heroicons/vue/24/outline";
-import type { AmirielDocument, AmirielLabels, AmirielMedia, AmirielMediaPlacement, AmirielPage, AmirielTextBlock } from "../types";
+import type {
+  AmirielDocument,
+  AmirielLabels,
+  AmirielMedia,
+  AmirielMediaPlacement,
+  AmirielPage,
+  AmirielPaperSize,
+  AmirielPaperSizeLimits,
+  AmirielTextBlock,
+} from "../types";
 import type { AmirielThemeDefinition } from "../themes";
-import { AMIRIEL_FONT_STACKS, AMIRIEL_TEXT_COLORS, combinedPageText, normalizeDocument, safeAspectRatio } from "../utils";
+import {
+  AMIRIEL_FONT_STACKS,
+  AMIRIEL_TEXT_COLORS,
+  clamp,
+  combinedPageText,
+  heightPercentForWidth,
+  mediaAspectRatio,
+  normalizeDocument,
+  normalizePaperSize,
+  safeAspectRatio,
+} from "../utils";
 import { amirielThemeCssVars, findAmirielThemeDefinition } from "../themes";
 import { resolveAmirielLabels } from "../labels";
 import AmirielCoreMediaLightbox from "./AmirielMediaLightbox.vue";
@@ -20,6 +39,12 @@ const props = withDefaults(defineProps<{
   interactive?: boolean;
   hidden?: boolean;
   lightbox?: boolean;
+  /** Fallback paper size for legacy documents without document.paper. */
+  defaultPaperSize?: AmirielPaperSize;
+  /** Optional bounds applied while normalizing paper size. */
+  paperSizeLimits?: AmirielPaperSizeLimits;
+  /** When false, the renderer always uses defaultPaperSize and ignores document.paper. */
+  paperResizable?: boolean;
 }>(), {
   pageIndex: 0,
   locale: "en",
@@ -27,18 +52,39 @@ const props = withDefaults(defineProps<{
   interactive: true,
   hidden: false,
   lightbox: true,
+  paperResizable: true,
 });
 
+function paperNormalizeOptions() {
+  return {
+    defaultPaperSize: props.defaultPaperSize,
+    paperSizeLimits: props.paperSizeLimits,
+    paperResizable: props.paperResizable,
+  };
+}
+
 const labels = computed(() => resolveAmirielLabels(props.locale, props.labels));
-const normalized = computed(() => normalizeDocument(props.document));
+const normalized = computed(() => normalizeDocument(props.document, paperNormalizeOptions()));
 const activeThemeStyle = computed(() =>
   amirielThemeCssVars(findAmirielThemeDefinition(normalized.value.theme, props.themes)),
 );
+const activePaperSize = computed(() => normalizePaperSize(normalized.value.paper, paperNormalizeOptions()));
+const paperFrameRef = ref<HTMLElement | null>(null);
+const paperScale = ref(1);
+const paperFrameStyle = computed(() => ({
+  height: `${activePaperSize.value.height * paperScale.value}px`,
+}));
+const paperSurfaceStyle = computed(() => ({
+  width: `${activePaperSize.value.width}px`,
+  height: `${activePaperSize.value.height}px`,
+  transform: `scale(${paperScale.value})`,
+}));
 const sortedPages = computed(() => [...normalized.value.pages].sort((a, b) => a.order - b.order));
 const currentPage = computed(() => sortedPages.value[props.pageIndex] ?? sortedPages.value[0]);
 const currentTextBlocks = computed(() => currentPage.value?.textBlocks ?? []);
 const lightboxMedia = ref<AmirielMedia | null>(null);
 const lightboxOpen = ref(false);
+let paperScaleObserver: ResizeObserver | null = null;
 
 function mediaById(id: string) {
   return normalized.value.media.find((item) => item.id === id);
@@ -83,12 +129,24 @@ function textBlockStyle(block: AmirielTextBlock) {
   };
 }
 
+function placementHeightPercent(placement: AmirielMediaPlacement) {
+  const media = mediaById(placement.mediaId);
+  const paper = activePaperSize.value;
+  return clamp(heightPercentForWidth(
+    placement.width,
+    placement.aspectRatio || mediaAspectRatio(media),
+    paper.width,
+    paper.height,
+  ), 8, 100 - placement.y);
+}
+
 function placementStyle(placement: AmirielMediaPlacement) {
   const media = mediaById(placement.mediaId);
   return {
     left: `${placement.x}%`,
     top: `${placement.y}%`,
     width: `${placement.width}%`,
+    height: `${placementHeightPercent(placement)}%`,
     aspectRatio: String(placement.aspectRatio || safeAspectRatio(media?.width, media?.height) || safeAspectRatio(placement.width, placement.height)),
     zIndex: placement.z,
   };
@@ -104,6 +162,46 @@ function closeMedia() {
   lightboxOpen.value = false;
   lightboxMedia.value = null;
 }
+
+function refreshPaperScale() {
+  const frame = paperFrameRef.value;
+  const width = activePaperSize.value.width;
+  if (!frame || width <= 0) {
+    paperScale.value = 1;
+    return;
+  }
+  const availableWidth = frame.clientWidth;
+  paperScale.value = availableWidth > 0 ? availableWidth / width : 1;
+}
+
+function setupPaperScaleObserver() {
+  paperScaleObserver?.disconnect();
+  paperScaleObserver = null;
+  refreshPaperScale();
+  if (!paperFrameRef.value || typeof ResizeObserver === "undefined") return;
+  paperScaleObserver = new ResizeObserver(refreshPaperScale);
+  paperScaleObserver.observe(paperFrameRef.value);
+}
+
+watch(
+  activePaperSize,
+  () => {
+    nextTick(refreshPaperScale);
+  },
+  { deep: true },
+);
+
+watch(
+  () => props.variant,
+  () => {
+    nextTick(setupPaperScaleObserver);
+  },
+);
+
+onMounted(setupPaperScaleObserver);
+onUnmounted(() => {
+  paperScaleObserver?.disconnect();
+});
 </script>
 
 <template>
@@ -115,7 +213,8 @@ function closeMedia() {
     ]"
     :style="activeThemeStyle"
   >
-    <article v-if="variant === 'paper'" class="amiriel-renderer__paper">
+    <div v-if="variant === 'paper'" ref="paperFrameRef" class="amiriel-renderer__paper-frame" :style="paperFrameStyle">
+    <article class="amiriel-renderer__paper" :style="paperSurfaceStyle">
       <div class="amiriel-renderer__head">
         <p class="amiriel-renderer__label">{{ title }}</p>
       </div>
@@ -160,6 +259,7 @@ function closeMedia() {
         </span>
       </div>
     </article>
+    </div>
 
     <template v-else>
       <p v-if="!currentTextBlocks.length" class="amiriel-renderer__body amiriel-renderer__body--layer" :style="fontStyle(currentPage?.font)">
@@ -229,15 +329,25 @@ function closeMedia() {
   color: var(--amiriel-paper-text);
 }
 
-.amiriel-renderer__paper {
+.amiriel-renderer__paper-frame {
   position: relative;
-  min-height: 520px;
+  width: 100%;
+  overflow: visible;
+}
+
+.amiriel-renderer__paper {
+  position: absolute;
+  top: 0;
+  left: 0;
+  min-height: 0;
   overflow: hidden;
   border: 1px solid var(--amiriel-paper-border);
   border-radius: 0.6rem;
   background: var(--amiriel-paper-bg);
   box-shadow: var(--amiriel-paper-shadow);
   color: var(--amiriel-paper-text);
+  transform-origin: top left;
+  will-change: transform;
 }
 
 .amiriel-renderer__head {
