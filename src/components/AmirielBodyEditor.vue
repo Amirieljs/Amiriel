@@ -269,12 +269,19 @@ function textBlockStyle(block: AmirielTextBlock) {
   };
 }
 
-function updatePaperDimension(dimension: PaperDimension, event: Event) {
+function updatePaperDimension(dimension: PaperDimension, event: Event, clampOutOfRange = false) {
   if (props.readonly || !props.paperResizable) return;
   const target = event.currentTarget as HTMLInputElement;
+  if (!target.value) return;
+  const value = Number(target.value);
+  if (!Number.isFinite(value)) return;
+  const limits = activePaperSizeLimits.value;
+  const min = dimension === "width" ? limits.minWidth : limits.minHeight;
+  const max = dimension === "width" ? limits.maxWidth : limits.maxHeight;
+  if (!clampOutOfRange && (value < min || value > max)) return;
   draft.value.paper = normalizePaperSize({
     ...activePaperSize.value,
-    [dimension]: Number(target.value),
+    [dimension]: value,
   }, paperNormalizeOptions());
   commit();
   nextTick(refreshPaperScale);
@@ -1050,7 +1057,8 @@ onUnmounted(() => {
               <span class="amiriel-body-editor__paper-size-input">
                 <input type="number" inputmode="numeric" :min="activePaperSizeLimits.minWidth"
                   :max="activePaperSizeLimits.maxWidth" :value="activePaperSize.width"
-                  @change="updatePaperDimension('width', $event)" />
+                  @input="updatePaperDimension('width', $event)"
+                  @change="updatePaperDimension('width', $event, true)" />
                 <span>{{ resolvedLabels.paperSizeUnit }}</span>
               </span>
             </label>
@@ -1059,7 +1067,8 @@ onUnmounted(() => {
               <span class="amiriel-body-editor__paper-size-input">
                 <input type="number" inputmode="numeric" :min="activePaperSizeLimits.minHeight"
                   :max="activePaperSizeLimits.maxHeight" :value="activePaperSize.height"
-                  @change="updatePaperDimension('height', $event)" />
+                  @input="updatePaperDimension('height', $event)"
+                  @change="updatePaperDimension('height', $event, true)" />
                 <span>{{ resolvedLabels.paperSizeUnit }}</span>
               </span>
             </label>

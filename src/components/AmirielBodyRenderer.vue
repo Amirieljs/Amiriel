@@ -166,12 +166,20 @@ function closeMedia() {
 function refreshPaperScale() {
   const frame = paperFrameRef.value;
   const width = activePaperSize.value.width;
-  if (!frame || width <= 0) {
+  const height = activePaperSize.value.height;
+  if (!frame || width <= 0 || height <= 0) {
     paperScale.value = 1;
     return;
   }
   const availableWidth = frame.clientWidth;
-  paperScale.value = availableWidth > 0 ? availableWidth / width : 1;
+  const widthScale = availableWidth > 0 ? availableWidth / width : 1;
+  if (props.variant === "layer") {
+    const availableHeight = frame.clientHeight;
+    const heightScale = availableHeight > 0 ? availableHeight / height : widthScale;
+    paperScale.value = Math.min(widthScale, heightScale);
+    return;
+  }
+  paperScale.value = widthScale;
 }
 
 function setupPaperScaleObserver() {
@@ -261,47 +269,49 @@ onUnmounted(() => {
     </article>
     </div>
 
-    <template v-else>
-      <p v-if="!currentTextBlocks.length" class="amiriel-renderer__body amiriel-renderer__body--layer" :style="fontStyle(currentPage?.font)">
-        {{ combinedPageText(currentPage) }}
-      </p>
-      <span v-else class="amiriel-renderer__text-layer">
-        <span
-          v-for="block in currentTextBlocks"
-          :key="block.id"
-          class="amiriel-renderer__text-block"
-          :style="[textBlockStyle(block), textBlockContentStyle(block, currentPage)]"
-        >
-          {{ block.text }}
+    <span v-else ref="paperFrameRef" class="amiriel-renderer__layer-frame">
+      <span class="amiriel-renderer__layer-surface" :style="paperSurfaceStyle">
+        <p v-if="!currentTextBlocks.length" class="amiriel-renderer__body amiriel-renderer__body--layer" :style="fontStyle(currentPage?.font)">
+          {{ combinedPageText(currentPage) }}
+        </p>
+        <span v-else class="amiriel-renderer__text-layer">
+          <span
+            v-for="block in currentTextBlocks"
+            :key="block.id"
+            class="amiriel-renderer__text-block"
+            :style="[textBlockStyle(block), textBlockContentStyle(block, currentPage)]"
+          >
+            {{ block.text }}
+          </span>
+        </span>
+        <span v-if="currentPlacements(currentPage).length" class="amiriel-renderer__media-layer">
+          <template v-for="placement in currentPlacements(currentPage)" :key="placement.id">
+            <button
+              v-if="mediaById(placement.mediaId)"
+              type="button"
+              class="amiriel-renderer__media"
+              :style="placementStyle(placement)"
+              :disabled="!interactive"
+              :tabindex="interactive ? 0 : -1"
+              :aria-label="labels.viewMedia"
+              @click.stop="openMedia(mediaById(placement.mediaId)!)"
+            >
+              <img
+                v-if="mediaById(placement.mediaId)?.type === 'image'"
+                :src="mediaById(placement.mediaId)?.url"
+                :alt="mediaById(placement.mediaId)?.objectKey || 'media'"
+                draggable="false"
+                @dragstart.prevent
+              />
+              <AmirielCoreMediaVideo v-else :media="mediaById(placement.mediaId)!" show-duration-badge muted preload="metadata" />
+              <span v-if="mediaById(placement.mediaId)?.type === 'video'" class="amiriel-renderer__video-mark" aria-hidden="true">
+                <FilmIcon />
+              </span>
+            </button>
+          </template>
         </span>
       </span>
-      <span v-if="currentPlacements(currentPage).length" class="amiriel-renderer__media-layer">
-        <template v-for="placement in currentPlacements(currentPage)" :key="placement.id">
-          <button
-            v-if="mediaById(placement.mediaId)"
-            type="button"
-            class="amiriel-renderer__media"
-            :style="placementStyle(placement)"
-            :disabled="!interactive"
-            :tabindex="interactive ? 0 : -1"
-            :aria-label="labels.viewMedia"
-            @click.stop="openMedia(mediaById(placement.mediaId)!)"
-          >
-            <img
-              v-if="mediaById(placement.mediaId)?.type === 'image'"
-              :src="mediaById(placement.mediaId)?.url"
-              :alt="mediaById(placement.mediaId)?.objectKey || 'media'"
-              draggable="false"
-              @dragstart.prevent
-            />
-            <AmirielCoreMediaVideo v-else :media="mediaById(placement.mediaId)!" show-duration-badge muted preload="metadata" />
-            <span v-if="mediaById(placement.mediaId)?.type === 'video'" class="amiriel-renderer__video-mark" aria-hidden="true">
-              <FilmIcon />
-            </span>
-          </button>
-        </template>
-      </span>
-    </template>
+    </span>
 
     <AmirielCoreMediaLightbox
       v-if="lightbox"
@@ -329,10 +339,35 @@ onUnmounted(() => {
   color: var(--amiriel-paper-text);
 }
 
+.amiriel-renderer--layer {
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: hidden;
+}
+
 .amiriel-renderer__paper-frame {
   position: relative;
   width: 100%;
   overflow: visible;
+}
+
+.amiriel-renderer__layer-frame {
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: hidden;
+}
+
+.amiriel-renderer__layer-surface {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  overflow: hidden;
+  color: inherit;
+  transform-origin: top left;
+  will-change: transform;
 }
 
 .amiriel-renderer__paper {
