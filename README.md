@@ -54,17 +54,6 @@ const document: AmirielDocument = normalizeDocument({
 | `@amiriel/react` | [Amirieljs/Amiriel-React](https://github.com/Amirieljs/Amiriel-React) | React components |
 | `@amiriel/vanilla` | [Amirieljs/Amiriel-Vanilla](https://github.com/Amirieljs/Amiriel-Vanilla) | Vanilla JS components |
 
-## Release Sync
-
-When `@amiriel/core` publishes a new version, this repository receives a
-`core-release` dispatch, upgrades its `@amiriel/core` dependency, bumps its own
-version, and publishes to npm.
-
-Configure these secrets:
-
-- `NPM_TOKEN`: npm automation token used for publishing
-- `AMIRIELJS_SYNC_TOKEN`: GitHub token with permission to push sync commits and tags
-
 ## License
 
 MIT
