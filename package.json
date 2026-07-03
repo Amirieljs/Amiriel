@@ -1,6 +1,6 @@
 {
   "name": "amiriel",
-  "version": "0.0.1-beta.6",
+  "version": "0.0.1-beta.7",
   "description": "Meta package that re-exports @amiriel/core for npm install amiriel.",
   "type": "module",
   "license": "MIT",
@@ -40,7 +40,7 @@
   },
   "sideEffects": false,
   "dependencies": {
-    "@amiriel/core": "^0.0.1-beta.6"
+    "@amiriel/core": "^0.0.1-beta.7"
   },
   "devDependencies": {
     "typescript": "^5.9.3"
